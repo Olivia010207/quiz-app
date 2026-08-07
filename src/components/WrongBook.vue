@@ -1,8 +1,8 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onBeforeUnmount } from 'vue'
 import {
   store, getWrongList, startWrongPractice,
-  removeWrongQuestionByFilteredIndex, clearWrongQuestions
+  removeWrongQuestionByFilteredIndex, clearWrongQuestions, syncNow
 } from '../store.js'
 
 const TYPE_LABEL = {
@@ -35,6 +35,11 @@ function clearAll() {
 function practice() {
   startWrongPractice(bankId.value || null)
 }
+
+// 离开错题本时自动同步（删除/清空操作可能改动了错题）
+onBeforeUnmount(() => {
+  syncNow()
+})
 </script>
 
 <template>

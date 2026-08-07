@@ -1,8 +1,8 @@
 <script setup>
-import { ref, computed, reactive, watch } from 'vue'
+import { ref, computed, reactive, watch, onBeforeUnmount } from 'vue'
 import {
   store, shuffle, setProgress, getProgress, countQuestions,
-  addWrongQuestion, removeWrongIfCorrect
+  addWrongQuestion, removeWrongIfCorrect, syncNow
 } from '../store.js'
 
 const TYPE_LABEL = {
@@ -199,6 +199,11 @@ function recordGroupResult(i, j, sq) {
 }
 
 const totalCount = computed(() => countQuestions(bank.value))
+
+// 离开做题页时自动同步（点击返回按钮触发）
+onBeforeUnmount(() => {
+  syncNow()
+})
 </script>
 
 <template>

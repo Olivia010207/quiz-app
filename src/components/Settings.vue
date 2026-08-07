@@ -142,7 +142,7 @@ function disconnect() {
       <div style="font-weight:600;margin-bottom:4px">同步说明</div>
       <ul>
         <li>仅同步<b>错题</b>和<b>做题进度</b>，题库保持本地</li>
-        <li>做题/答错后 2 秒自动推送到 GitHub Gist</li>
+        <li>离开做题页 / 切换标签 / 关闭页面时自动推送</li>
         <li>打开应用时自动拉取远程数据并合并</li>
         <li>换设备时：先在新设备配置 Token，再点"从远程拉取"</li>
       </ul>

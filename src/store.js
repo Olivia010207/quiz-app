@@ -33,15 +33,6 @@ export const store = reactive({
 })
 
 // ---------- 同步 ----------
-let syncTimer = null
-let pullAtStartup = false
-
-function scheduleSync() {
-  if (!isConfigured()) return
-  clearTimeout(syncTimer)
-  syncTimer = setTimeout(doSync, 2000) // 防抖：2秒内多次变动只推一次
-}
-
 async function doSync() {
   if (!isConfigured()) return
   store.sync.status = 'syncing'
@@ -59,9 +50,9 @@ async function doSync() {
   }
 }
 
-// 手动同步（设置页调用）
+// 手动同步（设置页 / 离开页面 / 关闭页面调用）
 export async function syncNow() {
-  if (!isConfigured()) throw new Error('未配置 Token')
+  if (!isConfigured()) return
   await doSync()
 }
 
@@ -111,10 +102,6 @@ async function loadAll() {
   }
 }
 loadAll()
-
-// 监听进度和错题变动 → 自动同步
-watch(() => store.progress, scheduleSync, { deep: true })
-watch(() => store.wrongQuestions, scheduleSync, { deep: true })
 
 // ---------- 题库存取 ----------
 export async function saveBanks() {
