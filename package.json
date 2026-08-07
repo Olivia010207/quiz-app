@@ -1,0 +1,22 @@
+{
+  "name": "exercises-quiz",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "idb-keyval": "^6.2.1",
+    "mammoth": "^1.8.0",
+    "vue": "^3.4.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.0",
+    "vite": "^5.0.0",
+    "vite-plugin-pwa": "^0.20.0"
+  }
+}
