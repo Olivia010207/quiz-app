@@ -4,6 +4,7 @@ import {
   store, shuffle, setProgress, getProgress, countQuestions,
   addWrongQuestion, removeWrongIfCorrect, syncNow
 } from '../store.js'
+import QuestionEditor from './QuestionEditor.vue'
 
 const TYPE_LABEL = {
   single: '单选', multi: '多选', judge: '判断', blank: '填空', group: '案例'
@@ -13,6 +14,24 @@ const bank = computed(() => store.currentBank)
 const shuffleOn = ref(false)
 const shuffleOrder = ref(null) // null=顺序，array=洗牌后的原始索引序列
 const index = ref(0)
+
+// 编辑本题
+const editing = ref(false)
+// 是否可编辑（错题练习等临时题库不可编辑）
+const canEdit = computed(() => !!bank.value && bank.value.id !== 'wrong-practice' && !!bank.value.id)
+// 当前题目在 bank.questions 中的真实索引（考虑乱序）
+const realIndex = computed(() => {
+  if (!bank.value) return 0
+  if (shuffleOrder.value) return shuffleOrder.value[index.value]
+  return index.value
+})
+function openEditor() {
+  if (!canEdit.value || !current.value) return
+  editing.value = true
+}
+function onEditorClose() {
+  editing.value = false
+}
 
 // 用户答案与提交状态：key = 题号（含子题用 g{i}_{j}）
 const userAnswers = reactive({})
@@ -217,6 +236,11 @@ onBeforeUnmount(() => {
         <input type="checkbox" :checked="shuffleOn" @change="toggleShuffle" />
         乱序
       </label>
+      <button
+        v-if="canEdit"
+        class="btn btn-sm btn-ghost"
+        @click="openEditor"
+      >✎ 编辑本题</button>
     </div>
 
     <!-- 统计 -->
@@ -284,7 +308,7 @@ onBeforeUnmount(() => {
               </div>
               <button
                 v-if="!submitted[`${index}_${j}`]"
-                class="btn btn-sm"
+                class="btn btn-block confirm-multi-btn"
                 @click="groupSubmitMulti(index, j)"
               >确认</button>
             </div>
@@ -344,7 +368,7 @@ onBeforeUnmount(() => {
               <span class="key">{{ opt.key }}.</span>
               <span class="label" v-html="opt.label"></span>
             </div>
-            <button v-if="!submitted[index]" class="btn btn-sm" @click="submitMulti(index)">确认答案</button>
+            <button v-if="!submitted[index]" class="btn btn-block confirm-multi-btn" @click="submitMulti(index)">确认答案</button>
           </div>
         </template>
 
@@ -404,5 +428,22 @@ onBeforeUnmount(() => {
       <button class="btn btn-ghost" :disabled="index === 0" @click="prev">上一题</button>
       <button class="btn" :disabled="index >= total - 1" @click="next">下一题</button>
     </div>
+
+    <!-- 编辑本题弹窗 -->
+    <QuestionEditor
+      v-if="editing && canEdit && current"
+      :bank-id="bank.id"
+      :question="current"
+      :index="realIndex"
+      @close="onEditorClose"
+    />
   </div>
 </template>
+
+<style scoped>
+.confirm-multi-btn {
+  margin-top: 4px;
+  padding: 12px 16px;
+  font-size: 15px;
+}
+</style>

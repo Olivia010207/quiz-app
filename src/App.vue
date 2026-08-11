@@ -6,12 +6,17 @@ import ImportPage from './components/ImportPage.vue'
 import QuizPage from './components/QuizPage.vue'
 import WrongBook from './components/WrongBook.vue'
 import Settings from './components/Settings.vue'
+import BankManage from './components/BankManage.vue'
 
 const view = computed(() => store.view)
 const title = computed(() => {
   if (view.value === 'import') return '导入题库'
   if (view.value === 'quiz') return store.currentBank?.name || '刷题'
   if (view.value === 'settings') return '设置'
+  if (view.value === 'manage') {
+    const b = store.banks.find(x => x.id === store.currentManageBankId)
+    return b ? `${b.name} · 题目管理` : '题目管理'
+  }
   if (view.value === 'wrongbook') {
     if (store.currentWrongBankId) {
       const b = store.banks.find(x => x.id === store.currentWrongBankId)
@@ -25,6 +30,7 @@ const title = computed(() => {
 function goList() {
   store.view = 'list'
   store.currentBank = null
+  store.currentManageBankId = null
 }
 </script>
 
@@ -56,5 +62,6 @@ function goList() {
     <QuizPage v-else-if="view === 'quiz'" />
     <WrongBook v-else-if="view === 'wrongbook'" />
     <Settings v-else-if="view === 'settings'" />
+    <BankManage v-else-if="view === 'manage'" />
   </main>
 </template>

@@ -20,8 +20,9 @@ const PROGRESS_KEY = 'quiz-progress'
 export const store = reactive({
   banks: [],
   currentBank: null,
-  view: 'list', // 'list' | 'import' | 'quiz' | 'wrongbook' | 'settings'
+  view: 'list', // 'list' | 'import' | 'quiz' | 'wrongbook' | 'settings' | 'manage'
   currentWrongBankId: null, // wrongbook 视图参数：null=全部，否则=某题库
+  currentManageBankId: null, // manage 视图参数：要管理的题库 id
   progress: JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}'),
   wrongQuestions: [],
   loading: true,
@@ -108,8 +109,26 @@ export async function saveBanks() {
   await set(BANKS_KEY, JSON.parse(JSON.stringify(store.banks)))
 }
 
+// 内容指纹：基于题库名+题目数量+前3题题干，跨设备稳定
+function computeFingerprint(bank) {
+  const sample = (bank.questions || []).slice(0, 3)
+    .map(q => (q.stem || q.sharedStem || '').substring(0, 50))
+    .join('|')
+  const text = (bank.name || '') + '|' + (bank.questions?.length || 0) + '|' + sample
+  // 简单 DJB2 哈希
+  let h = 5381
+  for (let i = 0; i < text.length; i++) {
+    h = ((h << 5) + h + text.charCodeAt(i)) >>> 0
+  }
+  return h.toString(36)
+}
+
+export function generateBankId(bank) {
+  return 'bank_' + computeFingerprint(bank)
+}
+
 export async function addBank(bank) {
-  bank.id = 'bank_' + Date.now()
+  bank.id = generateBankId(bank)
   bank.createdAt = new Date().toISOString()
   store.banks.push(bank)
   await saveBanks()
@@ -134,6 +153,112 @@ export async function renameBank(id, name) {
     bank.name = name
     await saveBanks()
   }
+}
+
+// 编辑更新某题（题库内按原 index 替换）
+export async function updateQuestion(bankId, questionIndex, newQuestion) {
+  const bank = store.banks.find(b => b.id === bankId)
+  if (!bank || !bank.questions[questionIndex]) return
+  bank.questions[questionIndex] = { ...bank.questions[questionIndex], ...newQuestion }
+  await saveBanks()
+}
+
+// 在指定位置插入新题（index = bank.questions.length 表示末尾）
+export async function insertQuestion(bankId, index, question) {
+  const bank = store.banks.find(b => b.id === bankId)
+  if (!bank) return
+  if (!bank.questions) bank.questions = []
+  const i = Math.max(0, Math.min(index, bank.questions.length))
+  bank.questions.splice(i, 0, question)
+  await saveBanks()
+}
+
+// 删除指定位置的题目
+export async function deleteQuestion(bankId, index) {
+  const bank = store.banks.find(b => b.id === bankId)
+  if (!bank || !bank.questions[index]) return
+  bank.questions.splice(index, 1)
+  await saveBanks()
+}
+
+// 上移/下移题目（direction = -1 上移，+1 下移）
+export async function moveQuestion(bankId, fromIndex, direction) {
+  const bank = store.banks.find(b => b.id === bankId)
+  if (!bank || !bank.questions) return
+  const toIndex = fromIndex + direction
+  if (toIndex < 0 || toIndex >= bank.questions.length) return
+  const [item] = bank.questions.splice(fromIndex, 1)
+  bank.questions.splice(toIndex, 0, item)
+  await saveBanks()
+}
+
+// 打开题库管理视图
+export function openManageView(bankId) {
+  store.currentManageBankId = bankId
+  store.view = 'manage'
+}
+
+// ---------- JSON 导出/导入 ----------
+export function exportBankToJson(bankId) {
+  const bank = store.banks.find(b => b.id === bankId)
+  if (!bank) return null
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    name: bank.name,
+    questions: JSON.parse(JSON.stringify(bank.questions))
+  }
+}
+
+export function exportAllBanksToJson() {
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    banks: store.banks.map(b => ({
+      name: b.name,
+      questions: JSON.parse(JSON.stringify(b.questions))
+    }))
+  }
+}
+
+// 导入单个题库 JSON，返回 { action: 'created'|'overwritten'|'renamed', bank }
+export async function importBankFromJson(data) {
+  const newBank = {
+    name: data.name || '未命名题库',
+    questions: data.questions || []
+  }
+  const newId = generateBankId(newBank)
+  const existing = store.banks.find(b => b.id === newId)
+
+  if (existing) {
+    // 指纹相同 = 同一份题库 → 覆盖内容，保留 id 和进度
+    existing.questions = newBank.questions
+    if (data.name) existing.name = data.name
+    await saveBanks()
+    return { action: 'overwritten', bank: existing }
+  } else {
+    // 检查同名题库
+    const sameName = store.banks.find(b => b.name === newBank.name)
+    if (sameName) {
+      // 同名但内容不同 → 自动改名
+      newBank.name = newBank.name + '(导入)'
+    }
+    newBank.id = newId
+    newBank.createdAt = new Date().toISOString()
+    store.banks.push(newBank)
+    await saveBanks()
+    return { action: 'created', bank: newBank }
+  }
+}
+
+// 批量导入多个题库
+export async function importMultipleBanks(banks) {
+  const results = []
+  for (const data of banks) {
+    const r = await importBankFromJson(data)
+    results.push(r)
+  }
+  return results
 }
 
 // ---------- 进度持久化（含答题状态） ----------
