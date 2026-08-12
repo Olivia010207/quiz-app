@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { parseFile } from '../parsers/index.js'
-import { addBank, store, importBankFromJson } from '../store.js'
+import { addBank, store, importBankFromJson, computeFingerprint } from '../store.js'
 
 // 模式切换：'file' | 'json'
 const mode = ref('file')
@@ -167,17 +167,15 @@ function detectConflict(bankData) {
     name: bankData.name || '未命名题库',
     questions: bankData.questions || []
   }
-  // 用 store 里的 generateBankId 思路重新实现一遍（避免引入额外函数）
-  const sample = (newBank.questions || []).slice(0, 3)
-    .map(q => (q.stem || q.sharedStem || '').substring(0, 50))
-    .join('|')
-  const text = newBank.name + '|' + newBank.questions.length + '|' + sample
-  let h = 5381
-  for (let i = 0; i < text.length; i++) {
-    h = ((h << 5) + h + text.charCodeAt(i)) >>> 0
-  }
-  const newId = 'bank_' + h.toString(36)
-  if (store.banks.some(b => b.id === newId)) return 'same'
+  const fp = computeFingerprint(newBank)
+  const sameFp = store.banks.find(b =>
+    // 如果 JSON 里带了 id，id 相同也算同一份
+    (bankData.id && b.id === bankData.id) ||
+    (b.fingerprint && b.fingerprint === fp) ||
+    // 兜底：旧题库没有 fingerprint 时实时重算比较
+    (!b.fingerprint && computeFingerprint({ name: b.name, questions: b.questions }) === fp)
+  )
+  if (sameFp) return 'same'
   if (store.banks.some(b => b.name === newBank.name)) return 'samename'
   return 'new'
 }

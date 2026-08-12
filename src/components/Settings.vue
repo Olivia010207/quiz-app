@@ -2,14 +2,16 @@
 import { ref, computed } from 'vue'
 import { store, syncNow, syncPull } from '../store.js'
 import {
-  getToken, setToken, getGistId, verifyToken, clearSyncConfig, isConfigured
+  getToken, setToken, getGistId, setGistId, verifyToken, clearSyncConfig,
+  isConfigured, findExistingSyncGist
 } from '../sync.js'
 
 const tokenInput = ref(getToken())
-const gistId = ref(getGistId())
+const gistIdInput = ref(getGistId())
 const verifying = ref(false)
 const verifyResult = ref(null)
 const syncing = ref(false)
+const discovering = ref(false)
 const message = ref('')
 
 const configured = computed(() => isConfigured())
@@ -31,7 +33,19 @@ async function saveAndVerify() {
     verifyResult.value = result
     if (result.ok) {
       setToken(tokenInput.value.trim())
-      message.value = `✓ Token 验证通过（用户：${result.username}）`
+      // Token 验证通过后，如果本地没有 gistId，自动尝试发现已有同步 Gist
+      if (!gistIdInput.value.trim()) {
+        const found = await findExistingSyncGist(tokenInput.value.trim())
+        if (found) {
+          setGistId(found)
+          gistIdInput.value = found
+          message.value = `✓ Token 验证通过（用户：${result.username}），已自动绑定 Gist（${found.substring(0, 8)}…）`
+        } else {
+          message.value = `✓ Token 验证通过（用户：${result.username}），还没发现已有同步 Gist，请点一次"立即推送"初始化`
+        }
+      } else {
+        message.value = `✓ Token 验证通过（用户：${result.username}）`
+      }
     } else {
       message.value = `✗ 验证失败：${result.error}`
     }
@@ -42,11 +56,47 @@ async function saveAndVerify() {
   }
 }
 
+function saveGistIdManually() {
+  const id = gistIdInput.value.trim()
+  if (id) {
+    setGistId(id)
+    message.value = `✓ Gist ID 已保存（${id.substring(0, 8)}…）`
+  } else {
+    setGistId('')
+    message.value = '已清空 Gist ID'
+  }
+}
+
+async function discoverGist() {
+  if (!tokenInput.value.trim()) {
+    message.value = '请先保存并验证 Token'
+    return
+  }
+  discovering.value = true
+  message.value = ''
+  try {
+    const found = await findExistingSyncGist(tokenInput.value.trim())
+    if (found) {
+      setGistId(found)
+      gistIdInput.value = found
+      message.value = `✓ 已找到并绑定同步 Gist（${found.substring(0, 8)}…）`
+    } else {
+      message.value = '没发现已有同步 Gist，请先在旧设备点一次"立即推送"初始化'
+    }
+  } catch (e) {
+    message.value = `✗ 搜索失败：${e.message}`
+  } finally {
+    discovering.value = false
+  }
+}
+
 async function pushNow() {
   syncing.value = true
   message.value = ''
   try {
     await syncNow()
+    // 推送后同步显示 gistId
+    gistIdInput.value = getGistId()
     message.value = '✓ 已推送到 Gist'
   } catch (e) {
     message.value = `✗ 推送失败：${e.message}`
@@ -60,7 +110,14 @@ async function pullNow() {
   message.value = ''
   try {
     const ok = await syncPull()
-    message.value = ok ? '✓ 已从 Gist 拉取并合并' : '✗ 拉取失败'
+    gistIdInput.value = getGistId()
+    if (ok) {
+      const wp = Object.keys(store.progress || {}).length
+      const wc = (store.wrongQuestions || []).length
+      message.value = `✓ 已从 Gist 拉取并合并（进度 ${wp} 个题库，错题 ${wc} 道）`
+    } else {
+      message.value = store.sync.error ? `✗ 拉取失败：${store.sync.error}` : '✗ 拉取失败'
+    }
   } catch (e) {
     message.value = `✗ 拉取失败：${e.message}`
   } finally {
@@ -73,7 +130,8 @@ function disconnect() {
   clearSyncConfig()
   setToken('')
   tokenInput.value = ''
-  gistId.value = ''
+  setGistId('')
+  gistIdInput.value = ''
   verifyResult.value = null
   message.value = '已断开同步'
 }
@@ -96,9 +154,9 @@ function disconnect() {
         <span>上次同步</span>
         <span>{{ lastSyncedAt }}</span>
       </div>
-      <div v-if="gistId" class="row" style="font-size:12px;color:var(--text-3)">
+      <div v-if="gistIdInput" class="row" style="font-size:12px;color:var(--text-3);margin-top:6px">
         <span>Gist ID</span>
-        <code>{{ gistId.substring(0, 12) }}…</code>
+        <code>{{ (gistIdInput || '（空）').substring(0, 12) }}{{ gistIdInput && gistIdInput.length > 12 ? '…' : '' }}</code>
       </div>
     </div>
 
@@ -112,6 +170,30 @@ function disconnect() {
       </div>
       <button class="btn btn-danger btn-block" style="margin-top:8px" @click="disconnect">
         断开同步
+      </button>
+    </div>
+
+    <!-- Gist ID 手动绑定 -->
+    <div v-if="configured" class="card" style="margin-bottom:16px">
+      <div style="font-weight:600;margin-bottom:8px">Gist ID（可选，自动发现失败时手动填入）</div>
+      <p style="font-size:13px;color:var(--text-3);margin-bottom:8px">
+        如果新设备填入 Token 后仍无法拉取：从旧设备设置页复制 Gist ID 粘到这里。
+      </p>
+      <div class="gist-input-row">
+        <input
+          v-model="gistIdInput"
+          placeholder="粘贴 Gist ID（形如 abc123def456…）"
+          class="gist-input"
+        />
+        <button class="btn btn-ghost btn-sm" @click="saveGistIdManually">保存</button>
+      </div>
+      <button
+        class="btn btn-block"
+        style="margin-top:8px"
+        :disabled="discovering || !configured"
+        @click="discoverGist"
+      >
+        {{ discovering ? '扫描中…' : '🔎 自动扫描并绑定已有 Gist' }}
       </button>
     </div>
 
@@ -141,10 +223,10 @@ function disconnect() {
     <div class="hint">
       <div style="font-weight:600;margin-bottom:4px">同步说明</div>
       <ul>
-        <li>仅同步<b>错题</b>和<b>做题进度</b>，题库保持本地</li>
+        <li>仅同步<b>错题</b>和<b>做题进度</b>，题库保持本地（换设备时先导入题库 JSON 再拉进度）</li>
+        <li>换设备步骤：①导入题库 JSON → ②填 Token 并验证 → ③点"从远程拉取"或自动扫描 Gist</li>
         <li>离开做题页 / 切换标签 / 关闭页面时自动推送</li>
         <li>打开应用时自动拉取远程数据并合并</li>
-        <li>换设备时：先在新设备配置 Token，再点"从远程拉取"</li>
       </ul>
     </div>
   </div>
@@ -152,17 +234,27 @@ function disconnect() {
 
 <style scoped>
 .settings { max-width: 600px; margin: 0 auto; }
-.row { display:flex; justify-content:space-between; align-items:center; }
+.row { display:flex; justify-content:space-between; align-items:center; gap: 8px; flex-wrap: wrap; }
 .badge { padding:2px 8px; border-radius:10px; font-size:12px; }
 .badge-idle { background: var(--bg-2, #eee); color: var(--text-3, #999); }
 .badge-syncing { background: #fff3cd; color: #856404; }
 .badge-success { background: #d4edda; color: #155724; }
 .badge-error { background: #f8d7da; color: #721c24; }
 .btn-block { width: 100%; }
+.btn-sm { padding: 6px 12px; font-size: 13px; }
 .msg { margin-top: 12px; padding: 10px; background: #d4edda; color: #155724; border-radius: 6px; font-size: 14px; }
 .msg-error { background: #f8d7da; color: #721c24; }
 .hint { margin-top: 16px; padding: 12px; background: var(--bg-2, #f6f6f6); border-radius: 6px; font-size: 13px; color: var(--text-2, #666); }
 .hint ul { margin: 4px 0 0; padding-left: 20px; }
 .hint li { margin: 4px 0; }
 code { background: var(--bg-2, #f0f0f0); padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+.gist-input-row { display: flex; gap: 6px; }
+.gist-input {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 13px;
+}
 </style>

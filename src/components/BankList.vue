@@ -2,7 +2,8 @@
 import { ref } from 'vue'
 import {
   store, deleteBank, countQuestions, wrongCount, openWrongBook,
-  exportBankToJson, exportAllBanksToJson, openManageView
+  renameBank as doRename, exportBankToJson, openManageView,
+  getProgress
 } from '../store.js'
 
 // 每个题库的菜单开关：bankId -> boolean
@@ -44,6 +45,21 @@ function manageBank(bank, e) {
 
 function fmtDate(s) {
   return new Date(s).toLocaleDateString('zh-CN')
+}
+
+// 某题库的做题进度：返回 { done, total, percent }
+function progressOf(bank) {
+  const total = countQuestions(bank)
+  const p = getProgress(bank.id) || {}
+  const submittedKeys = p.submitted ? Object.keys(p.submitted) : []
+  // submitted 是 { 题目index: true }，它的 size 就是做过的题数（包含错/对）
+  const done = Math.max(p.index || 0, submittedKeys.length)
+  const clipped = Math.min(done, total)
+  return {
+    done: clipped,
+    total,
+    percent: total === 0 ? 0 : Math.round(clipped * 100 / total)
+  }
 }
 
 // 导出单个题库为 JSON 文件
@@ -98,10 +114,13 @@ function goImportJson() {
       <div class="info" @click="startQuiz(bank)">
         <div class="name">{{ bank.name }}</div>
         <div class="meta">
-          {{ countQuestions(bank) }} 题 · {{ bank.source === 'word' ? 'Word' : (bank.source === 'excel' ? 'Excel' : (bank.source === 'json' ? 'JSON' : '导入')) }} · {{ fmtDate(bank.createdAt) }}
+          {{ countQuestions(bank) }} 题 · 已做 {{ progressOf(bank).done }}/{{ progressOf(bank).total }}（{{ progressOf(bank).percent }}%）· {{ bank.source === 'word' ? 'Word' : (bank.source === 'excel' ? 'Excel' : (bank.source === 'json' ? 'JSON' : '导入')) }} · {{ fmtDate(bank.createdAt) }}
           <template v-if="wrongCount(bank.id) > 0">
             · <span class="wrong-meta" @click.stop="openWb(bank, $event)">📖 {{ wrongCount(bank.id) }} 道错题</span>
           </template>
+        </div>
+        <div v-if="progressOf(bank).percent > 0" class="progress-bar">
+          <div class="progress-fill" :style="{ width: progressOf(bank).percent + '%' }"></div>
         </div>
       </div>
       <div class="ops">
@@ -126,11 +145,24 @@ function goImportJson() {
 </template>
 
 <style scoped>
-.bank-item .info { cursor: pointer; }
+.bank-item .info { cursor: pointer; min-width: 0; }
 .wrong-meta {
   color: var(--primary);
   cursor: pointer;
   text-decoration: underline;
+}
+.progress-bar {
+  margin-top: 8px;
+  height: 6px;
+  background: var(--bg-2, #eee);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary), #2dd4bf);
+  border-radius: 3px;
+  transition: width .3s ease;
 }
 .toolbar {
   display: flex;

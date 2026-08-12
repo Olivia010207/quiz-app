@@ -42,6 +42,29 @@ export async function verifyToken(token) {
   }
 }
 
+// 当本地没有 gistId 时：扫描用户的公开 Gists，找到 description/filename 匹配的
+// 返回 gistId 或 null
+export async function findExistingSyncGist(tokenOverride) {
+  const token = tokenOverride || getToken()
+  if (!token) return null
+  try {
+    // 每页最多 100 条，通常够用
+    const resp = await fetch(`${API}?per_page=100`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    if (!resp.ok) return null
+    const list = await resp.json()
+    if (!Array.isArray(list)) return null
+    for (const g of list) {
+      if (g.files && g.files[GIST_FILENAME]) return g.id
+      if (g.description && g.description.includes('Quiz sync data')) return g.id
+    }
+    return null
+  } catch (e) {
+    return null
+  }
+}
+
 // 上传数据到 Gist（若没 gistId 则创建，否则更新）
 export async function pushData(payload) {
   const token = getToken()
@@ -53,7 +76,16 @@ export async function pushData(payload) {
     ...payload
   }, null, 2)
 
-  const gistId = getGistId()
+  // 本地没 gistId 时先尝试找已有同步 Gist，避免多设备创建多个重复 Gist
+  let gistId = getGistId()
+  if (!gistId) {
+    const found = await findExistingSyncGist(token)
+    if (found) {
+      gistId = found
+      setGistId(found)
+    }
+  }
+
   const body = {
     description: 'Quiz sync data (progress + wrong questions)',
     files: { [GIST_FILENAME]: { content } }
@@ -76,15 +108,22 @@ export async function pushData(payload) {
   const data = await resp.json()
   // 新建的 gist 记下 id，下次复用
   if (!gistId && data.id) setGistId(data.id)
-  return { gistId: data.id, updatedAt: new Date().toISOString() }
+  return { gistId: data.id || gistId, updatedAt: new Date().toISOString() }
 }
 
 // 从 Gist 拉取数据
 export async function pullData() {
   const token = getToken()
-  const gistId = getGistId()
   if (!token) throw new Error('未配置 Token')
-  if (!gistId) throw new Error('尚未创建同步数据（请先推送一次）')
+
+  let gistId = getGistId()
+  // 本地没 gistId 时先尝试扫描用户的 Gists 找到已有的同步 Gist
+  if (!gistId) {
+    const found = await findExistingSyncGist(token)
+    if (!found) throw new Error('找不到同步数据（请在旧设备先点一次"立即推送"，或手动填入 Gist ID）')
+    gistId = found
+    setGistId(found)
+  }
 
   const resp = await fetch(`${API}/${gistId}`, {
     headers: { Authorization: `Bearer ${token}` }
