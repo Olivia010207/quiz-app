@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { parseFile } from '../parsers/index.js'
-import { addBank, store, importBankFromJson, computeFingerprint } from '../store.js'
+import { addBank, store, importBankFromJson } from '../store.js'
 
 // 模式切换：'file' | 'json'
 const mode = ref('file')
@@ -163,20 +163,11 @@ function countQuestionsRaw(questions) {
 
 // 冲突检测：返回 'same'(同一份覆盖) | 'samename'(同名不同内容) | 'new'(无冲突)
 function detectConflict(bankData) {
-  const newBank = {
-    name: bankData.name || '未命名题库',
-    questions: bankData.questions || []
-  }
-  const fp = computeFingerprint(newBank)
-  const sameFp = store.banks.find(b =>
-    // 如果 JSON 里带了 id，id 相同也算同一份
-    (bankData.id && b.id === bankData.id) ||
-    (b.fingerprint && b.fingerprint === fp) ||
-    // 兜底：旧题库没有 fingerprint 时实时重算比较
-    (!b.fingerprint && computeFingerprint({ name: b.name, questions: b.questions }) === fp)
-  )
-  if (sameFp) return 'same'
-  if (store.banks.some(b => b.name === newBank.name)) return 'samename'
+  // 有 id 且本地存在同 id → 同一份
+  if (bankData.id && store.banks.some(b => b.id === bankData.id)) return 'same'
+  // 同名 → 同名冲突
+  const name = bankData.name || '未命名题库'
+  if (store.banks.some(b => b.name === name)) return 'samename'
   return 'new'
 }
 

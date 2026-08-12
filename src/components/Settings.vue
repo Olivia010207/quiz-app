@@ -112,9 +112,10 @@ async function pullNow() {
     const ok = await syncPull()
     gistIdInput.value = getGistId()
     if (ok) {
+      const bc = (store.banks || []).length
       const wp = Object.keys(store.progress || {}).length
       const wc = (store.wrongQuestions || []).length
-      message.value = `✓ 已从 Gist 拉取并合并（进度 ${wp} 个题库，错题 ${wc} 道）`
+      message.value = `✓ 已拉取并合并（题库 ${bc} 个，进度 ${wp} 个，错题 ${wc} 道）`
     } else {
       message.value = store.sync.error ? `✗ 拉取失败：${store.sync.error}` : '✗ 拉取失败'
     }
@@ -223,8 +224,8 @@ function disconnect() {
     <div class="hint">
       <div style="font-weight:600;margin-bottom:4px">同步说明</div>
       <ul>
-        <li>仅同步<b>错题</b>和<b>做题进度</b>，题库保持本地（换设备时先导入题库 JSON 再拉进度）</li>
-        <li>换设备步骤：①导入题库 JSON → ②填 Token 并验证 → ③点"从远程拉取"或自动扫描 Gist</li>
+        <li>同步<b>题库</b>、<b>做题进度</b>和<b>错题</b>到 GitHub Gist（3 个文件）</li>
+        <li>换设备步骤：①填 Token 并验证 → ②点"从远程拉取"（题库会自动同步过来）</li>
         <li>离开做题页 / 切换标签 / 关闭页面时自动推送</li>
         <li>打开应用时自动拉取远程数据并合并</li>
       </ul>
