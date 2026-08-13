@@ -53,12 +53,14 @@ export async function syncPull() {
     store.sync.status = 'syncing'
     const data = await pullData()
 
-    // 合并题库：远程覆盖同 id 的本地题库，本地独有的保留
+    // 合并题库：同 id 时按 updatedAt 取更新的一方，本地独有的保留，远程独有的新增
     if (data.banks && data.banks.length > 0) {
       for (const remoteBank of data.banks) {
         const idx = store.banks.findIndex(b => b.id === remoteBank.id)
         if (idx >= 0) {
-          store.banks[idx] = remoteBank
+          const localU = store.banks[idx].updatedAt || 0
+          const remoteU = remoteBank.updatedAt || 0
+          if (remoteU > localU) store.banks[idx] = remoteBank
         } else {
           store.banks.push(remoteBank)
         }
@@ -102,6 +104,10 @@ export async function syncPull() {
 
 async function loadAll() {
   store.banks = (await get(BANKS_KEY)) || []
+  // 兼容旧数据：补 updatedAt
+  for (const b of store.banks) {
+    if (!b.updatedAt) b.updatedAt = b.createdAt || Date.now()
+  }
   store.wrongQuestions = (await get(WRONG_KEY)) || []
   store.loading = false
   if (isConfigured()) {
@@ -126,6 +132,7 @@ function generateBankId() {
 export async function addBank(bank) {
   if (!bank.id) bank.id = generateBankId()
   bank.createdAt = bank.createdAt || new Date().toISOString()
+  bank.updatedAt = Date.now()
   store.banks.push(bank)
   await saveBanks()
   return bank
@@ -146,6 +153,7 @@ export async function renameBank(id, name) {
   const bank = store.banks.find(b => b.id === id)
   if (bank) {
     bank.name = name
+    bank.updatedAt = Date.now()
     await saveBanks()
   }
 }
@@ -154,6 +162,7 @@ export async function updateQuestion(bankId, questionIndex, newQuestion) {
   const bank = store.banks.find(b => b.id === bankId)
   if (!bank || !bank.questions[questionIndex]) return
   bank.questions[questionIndex] = { ...bank.questions[questionIndex], ...newQuestion }
+  bank.updatedAt = Date.now()
   await saveBanks()
 }
 
@@ -163,6 +172,7 @@ export async function insertQuestion(bankId, index, question) {
   if (!bank.questions) bank.questions = []
   const i = Math.max(0, Math.min(index, bank.questions.length))
   bank.questions.splice(i, 0, question)
+  bank.updatedAt = Date.now()
   await saveBanks()
 }
 
@@ -170,6 +180,7 @@ export async function deleteQuestion(bankId, index) {
   const bank = store.banks.find(b => b.id === bankId)
   if (!bank || !bank.questions[index]) return
   bank.questions.splice(index, 1)
+  bank.updatedAt = Date.now()
   await saveBanks()
 }
 
@@ -180,6 +191,7 @@ export async function moveQuestion(bankId, fromIndex, direction) {
   if (toIndex < 0 || toIndex >= bank.questions.length) return
   const [item] = bank.questions.splice(fromIndex, 1)
   bank.questions.splice(toIndex, 0, item)
+  bank.updatedAt = Date.now()
   await saveBanks()
 }
 
@@ -222,7 +234,8 @@ export async function importBankFromJson(data) {
     name: data.name || '未命名题库',
     questions: data.questions || [],
     source: data.source || 'json',
-    createdAt: data.createdAt || new Date().toISOString()
+    createdAt: data.createdAt || new Date().toISOString(),
+    updatedAt: Date.now()
   }
   newBank.id = (typeof data.id === 'string' && data.id) ? data.id : generateBankId()
 
@@ -232,6 +245,7 @@ export async function importBankFromJson(data) {
     existing.questions = newBank.questions
     if (data.name) existing.name = newBank.name
     existing.source = existing.source || newBank.source
+    existing.updatedAt = Date.now()
     await saveBanks()
     return { action: 'overwritten', bank: existing }
   }
