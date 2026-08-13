@@ -2,8 +2,8 @@
 import { ref } from 'vue'
 import {
   store, deleteBank, countQuestions, wrongCount, openWrongBook,
-  renameBank as doRename, exportBankToJson, openManageView,
-  getProgress
+  renameBank as doRename, exportBankToJson, exportAllBanksToJson,
+  openManageView, getProgress, clearProgress, syncNow
 } from '../store.js'
 
 // 每个题库的菜单开关：bankId -> boolean
@@ -41,6 +41,16 @@ function manageBank(bank, e) {
   e.stopPropagation()
   closeMenus()
   openManageView(bank.id)
+}
+
+function restartBank(bank, e) {
+  e.stopPropagation()
+  closeMenus()
+  if (confirm(`确认重新做「${bank.name}」？将清空做题进度（错题保留）。`)) {
+    clearProgress(bank.id)
+    syncNow()
+    startQuiz(bank)
+  }
 }
 
 function fmtDate(s) {
@@ -135,6 +145,7 @@ function goImportJson() {
           <button class="btn btn-sm btn-ghost" @click="toggleMenu(bank.id, $event)">⋯</button>
           <div v-if="openMenus[bank.id]" class="menu">
             <div class="menu-item" @click="manageBank(bank, $event)">⚙ 管理题目</div>
+            <div class="menu-item" @click="restartBank(bank, $event)">↻ 重新做题</div>
             <div class="menu-item" @click="exportOne(bank, $event)">⬇ 导出 JSON</div>
             <div class="menu-item danger" @click="remove(bank)">🗑 删除题库</div>
           </div>

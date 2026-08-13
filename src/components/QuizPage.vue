@@ -49,20 +49,25 @@ const questions = computed(() => {
 const current = computed(() => questions.value[index.value])
 const total = computed(() => questions.value.length)
 
-// 恢复进度（含答题状态 + 洗牌顺序）
-const prog = getProgress(bank.value?.id)
-if (typeof prog.shuffle === 'boolean') shuffleOn.value = prog.shuffle
-if (prog.shuffleOrder) shuffleOrder.value = prog.shuffleOrder
-if (prog.index != null && prog.index < (bank.value?.questions.length || 0)) {
-  index.value = prog.index
-}
-if (prog.answers) Object.assign(userAnswers, prog.answers)
-if (prog.submitted) Object.assign(submitted, prog.submitted)
+// 是否为临时题库（错题练习等，不持久化进度）
+const isTemporary = computed(() => bank.value?.id === 'wrong-practice')
 
-// 持久化进度（题号 + 答题状态 + 洗牌顺序）
+// 恢复进度（含答题状态 + 洗牌顺序）—— 临时题库跳过
+if (!isTemporary.value) {
+  const prog = getProgress(bank.value?.id)
+  if (typeof prog.shuffle === 'boolean') shuffleOn.value = prog.shuffle
+  if (prog.shuffleOrder) shuffleOrder.value = prog.shuffleOrder
+  if (prog.index != null && prog.index < (bank.value?.questions.length || 0)) {
+    index.value = prog.index
+  }
+  if (prog.answers) Object.assign(userAnswers, prog.answers)
+  if (prog.submitted) Object.assign(submitted, prog.submitted)
+}
+
+// 持久化进度（题号 + 答题状态 + 洗牌顺序）—— 临时题库跳过
 let saveTimer = null
 function persistProgress() {
-  if (!bank.value) return
+  if (!bank.value || isTemporary.value) return
   clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
     setProgress(bank.value.id, {
