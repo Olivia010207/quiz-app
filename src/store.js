@@ -80,14 +80,35 @@ export async function syncPull() {
       localStorage.setItem(PROGRESS_KEY, JSON.stringify(store.progress))
     }
 
-    // 合并错题：并集去重
+    // 合并错题：并集去重（stemKey + bankId）
     if (data.wrongQuestions) {
-      const existingKeys = new Set(store.wrongQuestions.map(w =>
-        (w.question.stem || w.question.sharedStem || '') + '|' + w.bankId
-      ))
-      const remoteOnly = data.wrongQuestions.filter(w =>
-        !existingKeys.has((w.question.stem || w.question.sharedStem || '') + '|' + w.bankId)
-      )
+      function keyOf(w) {
+        // 兼容远端旧格式（带 question 快照）
+        if (w.stemKey) return w.stemKey + '|' + w.bankId
+        const shared = (w.question?.sharedStem || '').trim()
+        const sub = (w.question?.stem || '').trim()
+        const subIdx = w.question?.subQuestionIndex
+        if (shared && subIdx != null) return `__group__|${shared}|${sub}|${w.bankId}`
+        return sub + '|' + w.bankId
+      }
+      const existingKeys = new Set(store.wrongQuestions.map(keyOf))
+      const remoteOnly = data.wrongQuestions.filter(w => !existingKeys.has(keyOf(w)))
+        // 远端旧格式（question 快照）转新格式（stemKey）
+        .map(w => {
+          if (w.stemKey) return w
+          const shared = (w.question?.sharedStem || '').trim()
+          const sub = (w.question?.stem || '').trim()
+          const subIdx = w.question?.subQuestionIndex
+          let stemKey
+          if (shared && subIdx != null) stemKey = `__group__|${shared}|${sub}`
+          else stemKey = sub
+          return {
+            bankId: w.bankId,
+            bankName: w.bankName || '',
+            stemKey,
+            addedAt: w.addedAt || Date.now()
+          }
+        })
       store.wrongQuestions = [...store.wrongQuestions, ...remoteOnly]
       await set(WRONG_KEY, JSON.parse(JSON.stringify(store.wrongQuestions)))
     }
@@ -109,6 +130,25 @@ async function loadAll() {
     if (!b.updatedAt) b.updatedAt = b.createdAt || Date.now()
   }
   store.wrongQuestions = (await get(WRONG_KEY)) || []
+  // 兼容旧格式：带 question 快照的错题 → 转 stemKey
+  let migrated = false
+  store.wrongQuestions = store.wrongQuestions.map(w => {
+    if (w.stemKey || !w.question) return w
+    migrated = true
+    const shared = (w.question.sharedStem || '').trim()
+    const sub = (w.question.stem || '').trim()
+    const subIdx = w.question.subQuestionIndex
+    let stemKey
+    if (shared && subIdx != null) stemKey = `__group__|${shared}|${sub}`
+    else stemKey = sub
+    return {
+      bankId: w.bankId,
+      bankName: w.bankName || '',
+      stemKey,
+      addedAt: w.addedAt || Date.now()
+    }
+  })
+  if (migrated) saveWrongQuestions().catch(() => {})
   store.loading = false
   if (isConfigured()) {
     syncPull().catch(() => {})
@@ -304,30 +344,38 @@ export function getWrongList() {
   return store.wrongQuestions.filter(w => w.bankId === store.currentWrongBankId)
 }
 
+// 题干→stemKey：普通题用题干，案例子题用 group|shared|sub
+function stemKeyOf(question) {
+  if (!question) return ''
+  const shared = (question.sharedStem || '').trim()
+  const sub = (question.stem || '').trim()
+  const subIdx = question.subQuestionIndex
+  if (shared && (subIdx != null || question.type === 'group')) {
+    return `__group__|${shared}|${sub}`
+  }
+  return sub
+}
+
 export async function addWrongQuestion(question, bank) {
-  const stem = question.stem || question.sharedStem || ''
+  const key = stemKeyOf(question)
   const bankId = bank?.id || ''
-  if (!stem) return
-  if (store.wrongQuestions.some(w => {
-    const ws = w.question.stem || w.question.sharedStem || ''
-    return ws === stem && w.bankId === bankId
-  })) return
+  if (!key) return
+  if (store.wrongQuestions.some(w => w.bankId === bankId && w.stemKey === key)) return
   store.wrongQuestions.push({
-    question: JSON.parse(JSON.stringify(question)),
     bankId,
     bankName: bank?.name || '',
+    stemKey: key,
     addedAt: Date.now()
   })
   await saveWrongQuestions()
 }
 
 export async function removeWrongIfCorrect(question, bankId) {
-  const stem = question.stem || question.sharedStem || ''
-  if (!stem) return
-  const idx = store.wrongQuestions.findIndex(w => {
-    const ws = w.question.stem || w.question.sharedStem || ''
-    return ws === stem && (!bankId || w.bankId === bankId)
-  })
+  const key = stemKeyOf(question)
+  if (!key) return
+  const idx = store.wrongQuestions.findIndex(w =>
+    w.stemKey === key && (!bankId || w.bankId === bankId)
+  )
   if (idx >= 0) {
     store.wrongQuestions.splice(idx, 1)
     await saveWrongQuestions()
@@ -354,6 +402,35 @@ export async function clearWrongQuestions(bankId) {
   await saveWrongQuestions()
 }
 
+// 根据错题记录从当前题库里找到对应题目；找不到返回 null
+export function resolveWrongQuestion(wrong) {
+  const key = wrong.stemKey || ''
+  const bank = store.banks.find(b => b.id === wrong.bankId)
+  if (!bank || !key) return null
+  if (key.startsWith('__group__|')) {
+    const parts = key.split('|')
+    const shared = parts[1] || ''
+    const sub = parts.slice(2).join('|') || ''
+    for (const q of bank.questions || []) {
+      if (q.type !== 'group') continue
+      if ((q.sharedStem || '').trim() !== shared) continue
+      if (!q.questions) continue
+      for (let i = 0; i < q.questions.length; i++) {
+        const subQ = q.questions[i]
+        if ((subQ.stem || '').trim() === sub) {
+          return { ...subQ, sharedStem: q.sharedStem, subQuestionIndex: i }
+        }
+      }
+    }
+    return null
+  }
+  for (const q of bank.questions || []) {
+    if (q.type === 'group') continue
+    if ((q.stem || '').trim() === key) return q
+  }
+  return null
+}
+
 export function startWrongPractice(bankId) {
   const list = bankId
     ? store.wrongQuestions.filter(w => w.bankId === bankId)
@@ -362,11 +439,14 @@ export function startWrongPractice(bankId) {
   const bankName = bankId
     ? (store.banks.find(b => b.id === bankId)?.name + ' 错题练习')
     : '全部错题练习'
+  // 过滤掉找不到的失效题目
+  const questions = list.map(w => resolveWrongQuestion(w)).filter(Boolean)
+  if (questions.length === 0) return
   store.currentBank = {
     id: 'wrong-practice',
     name: bankName,
     source: 'wrong',
-    questions: list.map(w => w.question)
+    questions
   }
   store.view = 'quiz'
 }
