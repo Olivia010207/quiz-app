@@ -2,7 +2,7 @@
 import { ref, computed, reactive, watch, onBeforeUnmount } from 'vue'
 import {
   store, shuffle, setProgress, getProgress, countQuestions,
-  addWrongQuestion, removeWrongIfCorrect, syncNow
+  addWrongQuestion, removeWrongIfCorrect, syncNow, resolveWrongQuestion
 } from '../store.js'
 import QuestionEditor from './QuestionEditor.vue'
 
@@ -38,8 +38,18 @@ const userAnswers = reactive({})
 const submitted = reactive({})
 
 // 当前题目列表（按 shuffleOrder 重排，刷新后顺序不变）
+// 错题练习（wrong-practice）：每次都从错题记录 + 题库实时 resolve，保证编辑题目后立刻生效
 const questions = computed(() => {
   if (!bank.value) return []
+  if (bank.value.id === 'wrong-practice') {
+    const bankId = store.currentWrongBankId
+    const list = bankId
+      ? store.wrongQuestions.filter(w => w.bankId === bankId)
+      : store.wrongQuestions
+    const resolved = list.map(w => resolveWrongQuestion(w)).filter(Boolean)
+    if (shuffleOrder.value) return shuffleOrder.value.map(i => resolved[i])
+    return resolved
+  }
   if (shuffleOrder.value) {
     return shuffleOrder.value.map(i => bank.value.questions[i])
   }
