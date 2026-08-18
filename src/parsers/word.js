@@ -318,13 +318,34 @@ function makeQuestion(type, nodeHtml, numPrefixLen) {
 }
 
 function extractAnswer(q) {
-  // 题干末尾括号答案：A / AC / √ / × / 对 / 错
-  const m = q.stemText.match(/[（(]\s*([A-Ea-e]+|[√×Xx对错])\s*[）)]/)
-  if (m) {
-    q.answer = normalizeAnswer(m[1], q.type)
-    const bracketRe = /[（(]\s*(?:[A-Ea-e]+|[√×Xx对错])\s*[）)]/
-    q.stemText = q.stemText.replace(bracketRe, '（  ）').trim()
-    q.stemHtml = q.stemHtml.replace(bracketRe, '（  ）')
+  // 提取答案并替换所有（答案）→（  ）
+  // multi/single 括号里可能是 A 或 AC（组合）；multi 也可能出现多组单独括号：（A）、（B）、（C）
+  // judge：可能是 √×对错 或 A/B
+  const ans = new Set()
+  const bracketRe = /[（(]\s*([A-Ea-e]+|[√×Xx对错])\s*[）)]/g
+  let m
+  while ((m = bracketRe.exec(q.stemText)) !== null) {
+    const val = m[1]
+    // 如果是 multi 且是单字母，每个括号一个答案；如果是 AC 多字母，拆成多个
+    if (q.type === 'multi' || q.type === 'single') {
+      for (const ch of val.toUpperCase().split('')) {
+        if (/[A-E]/.test(ch)) ans.add(ch)
+      }
+    } else if (q.type === 'judge') {
+      ans.add(val)
+    } else {
+      ans.add(val)
+    }
+  }
+  if (ans.size > 0) {
+    if (q.type === 'judge') {
+      q.answer = [...ans].some(a => /[√对A]/.test(a)) ? '正确' : '错误'
+    } else {
+      q.answer = [...ans].sort().join('')
+    }
+    const removeBracket = /[（(]\s*(?:[A-Ea-e]+|[√×Xx对错])\s*[）)]/g
+    q.stemText = q.stemText.replace(removeBracket, '（  ）').trim()
+    q.stemHtml = q.stemHtml.replace(removeBracket, '（  ）')
   }
 }
 
@@ -390,7 +411,14 @@ function finalize(q, inline = false) {
       q.stemText = q.stemText.replace(/（\s*）[）)]+/g, '（  ）')
       q.stemHtml = q.stemHtml.replace(/（\s*）[）)]+/g, '（  ）')
     }
+
+    // 如果 single 提取到的答案字母数 ≥ 2 → 纠正为 multi（section标题可能判断错）
+    if (q.type === 'single' && q.answer && typeof q.answer === 'string' && q.answer.length >= 2) {
+      q.type = 'multi'
+    }
+
     if ((q.type === 'single' || q.type === 'multi') && q.options.length === 0) {
+      // 常规：A.xxx / A、xxx / A xxx
       let opts = parseOptions(q.stemText)
       if (opts.length < 2) opts = parseOptions(q.stemText, true)
       if (opts.length >= 2) {
@@ -399,9 +427,40 @@ function finalize(q, inline = false) {
         if (firstOptIdx > 0) q.stemText = q.stemText.substring(0, firstOptIdx).trim()
         const htmlMatch = q.stemHtml.match(/\s[A-E][.．、\s]/)
         if (htmlMatch) q.stemHtml = q.stemHtml.substring(0, htmlMatch.index)
+      } else {
+        // 兜底：内联格式（A工具袋;B工具箱…字母直接接中文，分号分隔）
+        const optStart = findOptionsStart(q.stemText)
+        if (optStart > 0) {
+          const optsRaw = q.stemText.substring(optStart)
+          const inlineOpts = parseInlineOptions(optsRaw)
+          if (inlineOpts.length >= 2) {
+            q.options = inlineOpts
+            q.stemText = q.stemText.substring(0, optStart)
+              .replace(/[。；;\s]+$/g, '').replace(/[。.]$/g, '').trim()
+            // 对 HTML 做近似处理：按相同长度切或直接用 stemText
+            const htmlOptIdx = q.stemHtml.length >= optStart
+              ? optStart
+              : q.stemHtml.length
+            q.stemHtml = q.stemHtml.substring(0, htmlOptIdx)
+              .replace(/[。；;\s]+$/g, '').replace(/[。.]$/g, '').trim()
+          }
+        }
       }
     }
-    if (q.type === 'judge') q.options = null
+
+    // judge：如果题干里残留 "A正确;B错误" 这类内联选项，清掉
+    if (q.type === 'judge') {
+      const optStart = findOptionsStart(q.stemText)
+      if (optStart > 0) {
+        q.stemText = q.stemText.substring(0, optStart)
+          .replace(/[。；;\s]+$/g, '').replace(/[。.]$/g, '').trim()
+        if (q.stemHtml.length >= optStart) {
+          q.stemHtml = q.stemHtml.substring(0, optStart)
+            .replace(/[。；;\s]+$/g, '').replace(/[。.]$/g, '').trim()
+        }
+      }
+      q.options = null
+    }
   }
 
   // 内联格式：题干/选项/答案已在 parseInlineChunk 中提取完，这里只清理尾部标点
