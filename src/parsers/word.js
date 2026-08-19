@@ -233,26 +233,39 @@ function parseInlineChunk(chunk) {
 }
 
 // 在一串题干+选项连在一起的文本里，找到选项开始的位置
-// 策略：找最后一次 A + (点/分号/空格/...) 出现在合理字母区间里的起始
+// 策略：找最后一次 A + (点/分号/空格/中文/数字) 出现在合理字母区间里的起始
 function findOptionsStart(text) {
   // 严格模式：A. / B. / C. 等
   const strict = [...text.matchAll(/[A-E][.．、]\s*/g)]
   if (strict.length >= 2) return strict[0].index
 
-  // 宽松模式：A后直接中文（例如 "A工具袋"）
-  // 这种情况下，A后面紧跟的是非空白非字母字符
-  const loose = [...text.matchAll(/(?<!\w)[A-E](?=[\u4e00-\u9fa5（(《"“'`·])/g)]
+  // 宽松模式：A后直接中文或数字（例如 "A工具袋" "A30"）
+  const loose = [...text.matchAll(/(?<!\w)[A-E](?=[\u4e00-\u9fa50-9（(《"“'`·])/g)]
   if (loose.length >= 2) return loose[0].index
 
-  // 混合：Axxx; Bxxx; Cxxx   —— 找选项分号 ";" 至少 2 个再加上 Axxx Bxxx 的组合
-  const semicolon = [...text.matchAll(/(?<!\w)[A-E][\s]*(?=[\u4e00-\u9fa5A-Z（(])/g)]
+  // 混合：Axxx; Bxxx; Cxxx —— 字母+空格后接内容
+  const semicolon = [...text.matchAll(/(?<!\w)[A-E]\s*(?=[\u4e00-\u9fa50-9A-Z（(《])/g)]
   if (semicolon.length >= 2) return semicolon[0].index
 
   return -1
 }
 
+// 计算 stemText / stemHtml 各自的切点位置
+// stemHtml 可能含标签，长度≠stemText；必须独立搜索，不能直接用text的下标
+function findOptionCutPoints(stemText, stemHtml) {
+  const textIdx = findOptionsStart(stemText)
+  if (textIdx < 0) return { htmlIdx: -1, textIdx: -1 }
+  // 用 text 中锚点串（选项首32字符）直接搜 html
+  const anchor = stemText.substring(textIdx, textIdx + 32)
+  if (!anchor) return { htmlIdx: -1, textIdx }
+  const esc = anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const hm = stemHtml.match(new RegExp(esc))
+  if (hm) return { htmlIdx: hm.index, textIdx }
+  return { htmlIdx: -1, textIdx }
+}
+
 // 从内联选项字符串里解析 [{key,label}, ...]
-// 输入示例："A工具袋;    B工具箱;C绳索;D梯子。"  / "A立体化;B透明化;   C源头化。"
+// 输入示例："A工具袋;    B工具箱;C绳索;D梯子。"  / "A立体化;B透明化;   C源头化。" / "A30;B45;C60; D90。"
 // 选项 label 可能含中文标点，以 ; 或下一个字母 切分
 function parseInlineOptions(raw) {
   // 先把结尾句号/空格去掉
@@ -260,7 +273,8 @@ function parseInlineOptions(raw) {
 
   // 切出每个选项标记：A/B/C/D/E，前面是开头或非字母字符
   const markers = []
-  const re = /(?<![A-Za-z])([A-E])(?=[\u4e00-\u9fa5（(《"“'`·])/g
+  // A 后直接接中文/数字/符号
+  const re = /(?<![A-Za-z])([A-E])(?=[\u4e00-\u9fa50-9（(《"“'`·])/g
   // 以及 A.  B. 这种带点的
   const re2 = /(?<![A-Za-z])([A-E])[.．、]\s*/g
   // 合并，按位置排
@@ -428,8 +442,9 @@ function finalize(q, inline = false) {
         const htmlMatch = q.stemHtml.match(/\s[A-E][.．、\s]/)
         if (htmlMatch) q.stemHtml = q.stemHtml.substring(0, htmlMatch.index)
       } else {
-        // 兜底：内联格式（A工具袋;B工具箱…字母直接接中文，分号分隔）
-        const optStart = findOptionsStart(q.stemText)
+        // 兜底：内联格式（A工具袋;B工具箱 / A30;B45 字母直接接内容，分号分隔）
+        const cut = findOptionCutPoints(q.stemText, q.stemHtml)
+        const optStart = cut.textIdx
         if (optStart > 0) {
           const optsRaw = q.stemText.substring(optStart)
           const inlineOpts = parseInlineOptions(optsRaw)
@@ -437,12 +452,21 @@ function finalize(q, inline = false) {
             q.options = inlineOpts
             q.stemText = q.stemText.substring(0, optStart)
               .replace(/[。；;\s]+$/g, '').replace(/[。.]$/g, '').trim()
-            // 对 HTML 做近似处理：按相同长度切或直接用 stemText
-            const htmlOptIdx = q.stemHtml.length >= optStart
-              ? optStart
-              : q.stemHtml.length
-            q.stemHtml = q.stemHtml.substring(0, htmlOptIdx)
-              .replace(/[。；;\s]+$/g, '').replace(/[。.]$/g, '').trim()
+            // HTML 切：优先用 html 里锚点位置（避免 stemHtml 含标签时与 text 长度不一致导致多吃字）
+            let htmlIdx = cut.htmlIdx
+            if (htmlIdx < 0) {
+              const marker = optsRaw.substring(0, 10) || optsRaw
+              if (marker) {
+                const idx = q.stemHtml.indexOf(marker)
+                if (idx >= 0) htmlIdx = idx
+              }
+            }
+            if (htmlIdx > 0) {
+              q.stemHtml = q.stemHtml.substring(0, htmlIdx)
+                .replace(/[。；;\s]+$/g, '').replace(/[。.]$/g, '').trim()
+            } else {
+              q.stemHtml = q.stemText
+            }
           }
         }
       }
@@ -450,13 +474,23 @@ function finalize(q, inline = false) {
 
     // judge：如果题干里残留 "A正确;B错误" 这类内联选项，清掉
     if (q.type === 'judge') {
-      const optStart = findOptionsStart(q.stemText)
+      const cut = findOptionCutPoints(q.stemText, q.stemHtml)
+      const optStart = cut.textIdx
       if (optStart > 0) {
         q.stemText = q.stemText.substring(0, optStart)
           .replace(/[。；;\s]+$/g, '').replace(/[。.]$/g, '').trim()
-        if (q.stemHtml.length >= optStart) {
-          q.stemHtml = q.stemHtml.substring(0, optStart)
+        let htmlIdx = cut.htmlIdx
+        if (htmlIdx < 0) {
+          // 同样找锚点
+          const reOpt = /[A-E]\s*(正确|错误|对|错)/
+          const hm = q.stemHtml.match(reOpt)
+          if (hm) htmlIdx = hm.index
+        }
+        if (htmlIdx > 0) {
+          q.stemHtml = q.stemHtml.substring(0, htmlIdx)
             .replace(/[。；;\s]+$/g, '').replace(/[。.]$/g, '').trim()
+        } else {
+          q.stemHtml = q.stemText
         }
       }
       q.options = null
