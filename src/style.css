@@ -234,6 +234,17 @@ body {
 .question .q-answer .label { color: var(--text-3); }
 .question .q-answer .value { color: var(--success); font-weight: 600; }
 
+.question .q-analysis {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border-radius: var(--radius);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.question .q-analysis .label { color: var(--text-3); }
+.question .q-analysis .value { color: var(--text-2); }
+
 /* 填空输入 */
 .blank-input {
   display: inline-block;

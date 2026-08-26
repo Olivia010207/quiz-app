@@ -42,7 +42,7 @@ function parseFormat1(workbook) {
       const answer = String(row[colMap.answer] || '').trim()
       const opts = collectOptions(row, colMap)
 
-      questions.push(buildQuestion(type, stem, opts, answer, colMap, row))
+      questions.push(buildQuestion(type, stem, opts, answer, colMap, row, true))
     }
   }
   return questions
@@ -142,7 +142,7 @@ function collectMeta(colMap, row) {
   return meta
 }
 
-function buildQuestion(type, stem, opts, answer, colMap, row) {
+function buildQuestion(type, stem, opts, answer, colMap, row, withMeta = false) {
   const q = { type, stem, options: null, answer: null, analysis: null }
   if (type === 'judge') {
     // 有选项（错误/正确）→ 按位置映射；无选项 → A=正确 B=错误
@@ -161,6 +161,11 @@ function buildQuestion(type, stem, opts, answer, colMap, row) {
   }
   if (colMap.analysis != null) {
     q.analysis = String(row[colMap.analysis] || '').trim()
+  }
+  if (withMeta) {
+    if (colMap.source != null) q.source = String(row[colMap.source] || '').trim()
+    if (colMap.difficulty != null) q.difficulty = String(row[colMap.difficulty] || '').trim()
+    if (colMap.category != null) q.category = String(row[colMap.category] || '').trim()
   }
   return q
 }

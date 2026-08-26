@@ -336,6 +336,11 @@ onBeforeUnmount(() => {
                 {{ isGroupSubCorrect(index, j, sq) ? '✓ 正确' : '✗ 错误' }}
               </span>
             </div>
+            <!-- 子题解析 -->
+            <div v-if="submitted[`${index}_${j}`] && sq.analysis" class="q-analysis">
+              <span class="label">解析：</span>
+              <span class="value" v-html="sq.analysis"></span>
+            </div>
           </div>
         </div>
       </template>
@@ -434,6 +439,12 @@ onBeforeUnmount(() => {
           <span style="margin-left:12px" :style="{color: isCorrect(index, current) ? 'var(--success)' : 'var(--danger)'}">
             {{ isCorrect(index, current) ? '✓ 正确' : '✗ 错误' }}
           </span>
+        </div>
+
+        <!-- 解析（有才显示） -->
+        <div v-if="submitted[index] && current.analysis" class="q-analysis">
+          <span class="label">解析：</span>
+          <span class="value" v-html="current.analysis"></span>
         </div>
       </div>
     </template>
