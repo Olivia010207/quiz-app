@@ -2,7 +2,7 @@
 import { ref, computed, reactive, watch, onBeforeUnmount } from 'vue'
 import {
   store, shuffle, setProgress, getProgress, countQuestions,
-  addWrongQuestion, removeWrongIfCorrect, syncNow, resolveWrongQuestion
+  addWrongQuestion, syncNow, resolveWrongQuestion
 } from '../store.js'
 import QuestionEditor from './QuestionEditor.vue'
 
@@ -166,15 +166,9 @@ function normalize(s) {
   return String(s || '').trim().toLowerCase()
 }
 
-// 判分后记录/移出错题本
-// 正常刷题：错题只增不减（重新刷题答对不会清除之前的错题）
-// 错题练习：答对则移除（用真实 bankId 匹配）
+// 判分后记录错题（只增不减：无论正常刷题还是错题练习，答对都不移除）
 function recordResult(i, q) {
-  if (isCorrect(i, q)) {
-    if (isTemporary.value) {
-      removeWrongIfCorrect(q, store.currentWrongBankId || '')
-    }
-  } else if (!isTemporary.value) {
+  if (!isCorrect(i, q) && !isTemporary.value) {
     addWrongQuestion(q, bank.value)
   }
 }
@@ -233,11 +227,7 @@ function groupSubmitMulti(i, j) {
 }
 
 function recordGroupResult(i, j, sq) {
-  if (isGroupSubCorrect(i, j, sq)) {
-    if (isTemporary.value) {
-      removeWrongIfCorrect(sq, store.currentWrongBankId || '')
-    }
-  } else if (!isTemporary.value) {
+  if (!isGroupSubCorrect(i, j, sq) && !isTemporary.value) {
     addWrongQuestion(sq, bank.value)
   }
 }
