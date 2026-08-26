@@ -128,21 +128,35 @@ export async function pullData() {
   const data = await resp.json()
   const result = { banks: [], progress: {}, wrongQuestions: [] }
 
+  function safeParse(content) {
+    if (!content || typeof content !== 'string') return null
+    try {
+      return JSON.parse(content)
+    } catch (e) {
+      console.warn('JSON parse failed:', e.message)
+      return null
+    }
+  }
+
   const banksFile = data.files && data.files[FILE_BANKS]
   if (banksFile) {
-    const parsed = JSON.parse(banksFile.content)
-    result.banks = parsed.banks || []
-    result.updatedAt = parsed.updatedAt
+    const parsed = safeParse(banksFile.content)
+    if (parsed) {
+      result.banks = parsed.banks || []
+      result.updatedAt = parsed.updatedAt
+    }
   }
 
   const progressFile = data.files && data.files[FILE_PROGRESS]
   if (progressFile) {
-    result.progress = JSON.parse(progressFile.content).progress || {}
+    const parsed = safeParse(progressFile.content)
+    if (parsed) result.progress = parsed.progress || {}
   }
 
   const wrongFile = data.files && data.files[FILE_WRONG]
   if (wrongFile) {
-    result.wrongQuestions = JSON.parse(wrongFile.content).wrongQuestions || []
+    const parsed = safeParse(wrongFile.content)
+    if (parsed) result.wrongQuestions = parsed.wrongQuestions || []
   }
 
   return result
