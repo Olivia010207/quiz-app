@@ -162,6 +162,10 @@ function buildQuestion(type, stem, opts, answer, colMap, row, withMeta = false) 
   if (colMap.analysis != null) {
     q.analysis = String(row[colMap.analysis] || '').trim()
   }
+  // 如果没有专门的"解析"列，用"出自规范"列作为解析
+  if (!q.analysis && colMap.source != null) {
+    q.analysis = String(row[colMap.source] || '').trim()
+  }
   if (withMeta) {
     if (colMap.source != null) q.source = String(row[colMap.source] || '').trim()
     if (colMap.difficulty != null) q.difficulty = String(row[colMap.difficulty] || '').trim()
