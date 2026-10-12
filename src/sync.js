@@ -141,6 +141,9 @@ export async function pullData() {
   const banksFile = data.files && data.files[FILE_BANKS]
   if (banksFile) {
     const parsed = safeParse(banksFile.content)
+    if (!parsed && banksFile.content) {
+      throw new Error('云端题库数据已损坏（JSON 不完整，可能是之前推送被中断）。请在数据完好的设备上点「立即推送」覆盖修复后，再在本设备拉取')
+    }
     if (parsed) {
       result.banks = parsed.banks || []
       result.updatedAt = parsed.updatedAt
