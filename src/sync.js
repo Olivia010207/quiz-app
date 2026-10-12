@@ -70,6 +70,24 @@ export async function pushData(payload) {
 
   const updatedAt = new Date().toISOString()
 
+  // 预序列化 + 校验（保证每个文件都是合法 JSON，大小不超限）
+  function serialize(label, obj) {
+    const str = JSON.stringify(obj, null, 2)
+    // 自校验：再 parse 回来确保是合法 JSON
+    try { JSON.parse(str) } catch (e) {
+      throw new Error(`${label} 序列化后不是合法 JSON: ${e.message}`)
+    }
+    // Gist 单文件上限约 1MB，超过则告警（不阻止，GitHub 会自己拒绝）
+    if (str.length > 950000) {
+      console.warn(`${label} 大小 ${(str.length / 1024).toFixed(1)}KB 接近 Gist 1MB 上限`)
+    }
+    return str
+  }
+
+  const banksContent = serialize('banks.json', { updatedAt, banks: payload.banks })
+  const progressContent = serialize('progress.json', { updatedAt, progress: payload.progress })
+  const wrongContent = serialize('wrong-questions.json', { updatedAt, wrongQuestions: payload.wrongQuestions })
+
   let gistId = getGistId()
   if (!gistId) {
     const found = await findExistingSyncGist(token)
@@ -82,9 +100,9 @@ export async function pushData(payload) {
   const body = {
     description: 'Quiz sync data (banks + progress + wrong questions)',
     files: {
-      [FILE_BANKS]: { content: JSON.stringify({ updatedAt, banks: payload.banks }, null, 2) },
-      [FILE_PROGRESS]: { content: JSON.stringify({ updatedAt, progress: payload.progress }, null, 2) },
-      [FILE_WRONG]: { content: JSON.stringify({ updatedAt, wrongQuestions: payload.wrongQuestions }, null, 2) }
+      [FILE_BANKS]: { content: banksContent },
+      [FILE_PROGRESS]: { content: progressContent },
+      [FILE_WRONG]: { content: wrongContent }
     }
   }
 
@@ -128,6 +146,21 @@ export async function pullData() {
   const data = await resp.json()
   const result = { banks: [], progress: {}, wrongQuestions: [] }
 
+  // 拉取单个文件内容，处理 GitHub 对大文件的 inline content 截断
+  async function fetchFileContent(file) {
+    if (!file) return null
+    // 如果 GitHub 标记了 truncated，或者 content 看起来不够用（长度和 size 不匹配），走 raw_url
+    if (file.truncated || (file.size != null && file.content && file.content.length < file.size)) {
+      try {
+        const rawResp = await fetch(file.raw_url)
+        if (rawResp.ok) return await rawResp.text()
+      } catch (e) {
+        console.warn('raw_url fetch failed, falling back to inline content:', e.message)
+      }
+    }
+    return file.content || null
+  }
+
   function safeParse(content) {
     if (!content || typeof content !== 'string') return null
     try {
@@ -138,10 +171,12 @@ export async function pullData() {
     }
   }
 
+  // 题库文件
   const banksFile = data.files && data.files[FILE_BANKS]
   if (banksFile) {
-    const parsed = safeParse(banksFile.content)
-    if (!parsed && banksFile.content) {
+    const content = await fetchFileContent(banksFile)
+    const parsed = safeParse(content)
+    if (!parsed && content) {
       throw new Error('云端题库数据已损坏（JSON 不完整，可能是之前推送被中断）。请在数据完好的设备上点「立即推送」覆盖修复后，再在本设备拉取')
     }
     if (parsed) {
@@ -150,15 +185,19 @@ export async function pullData() {
     }
   }
 
+  // 进度文件
   const progressFile = data.files && data.files[FILE_PROGRESS]
   if (progressFile) {
-    const parsed = safeParse(progressFile.content)
+    const content = await fetchFileContent(progressFile)
+    const parsed = safeParse(content)
     if (parsed) result.progress = parsed.progress || {}
   }
 
+  // 错题文件
   const wrongFile = data.files && data.files[FILE_WRONG]
   if (wrongFile) {
-    const parsed = safeParse(wrongFile.content)
+    const content = await fetchFileContent(wrongFile)
+    const parsed = safeParse(content)
     if (parsed) result.wrongQuestions = parsed.wrongQuestions || []
   }
 
