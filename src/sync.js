@@ -29,6 +29,20 @@ export function isConfigured() {
   return !!getToken()
 }
 
+// 带重试的 fetch：网络抖动（Failed to fetch / 连接超时）时自动重试 2 次
+async function fetchWithRetry(url, options, retries = 2) {
+  for (let i = 0; ; i++) {
+    try {
+      return await fetch(url, options)
+    } catch (e) {
+      if (i >= retries) {
+        throw new Error(`网络连接 GitHub 失败（已重试 ${retries} 次），请检查网络后重试`)
+      }
+      await new Promise(r => setTimeout(r, 1000 * (i + 1)))
+    }
+  }
+}
+
 export async function verifyToken(token) {
   try {
     const resp = await fetch('https://api.github.com/user', {
@@ -106,7 +120,7 @@ export async function pushData(payload) {
     }
   }
 
-  const resp = await fetch(gistId ? `${API}/${gistId}` : API, {
+  const resp = await fetchWithRetry(gistId ? `${API}/${gistId}` : API, {
     method: gistId ? 'PATCH' : 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -138,7 +152,7 @@ export async function pullData() {
     setGistId(found)
   }
 
-  const resp = await fetch(`${API}/${gistId}`, {
+  const resp = await fetchWithRetry(`${API}/${gistId}`, {
     headers: { Authorization: `Bearer ${token}` }
   })
   if (!resp.ok) throw new Error(`拉取失败 (HTTP ${resp.status})`)
@@ -152,7 +166,7 @@ export async function pullData() {
     // 如果 GitHub 标记了 truncated，或者 content 看起来不够用（长度和 size 不匹配），走 raw_url
     if (file.truncated || (file.size != null && file.content && file.content.length < file.size)) {
       try {
-        const rawResp = await fetch(file.raw_url)
+        const rawResp = await fetchWithRetry(file.raw_url, {}, 1)
         if (rawResp.ok) return await rawResp.text()
       } catch (e) {
         console.warn('raw_url fetch failed, falling back to inline content:', e.message)
